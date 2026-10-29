@@ -271,8 +271,17 @@ test("browser: filter, 1/2/3 uploads, multiple jobs, refresh recovery, identity 
     await expect(page.getByTestId(`task-${id}`)).toHaveCount(0);
   await page.reload();
   await expect(page.getByLabel("演示用户")).toHaveValue("bob");
+  await page.goto("/templates/lunar");
+  await page.getByLabel("选择素材 1", { exact: true }).setInputFiles(sample(2));
+  await expect(page.getByText("✓ 上传完成", { exact: true })).toBeVisible();
+  await configure(page, "", 200);
+  const bobId = await submit(page);
+  await page.goto("/history");
+  await expect(page.getByTestId(`task-${bobId}`)).toContainText("已完成", { timeout: 30000 });
+  for (const id of ids) await expect(page.getByTestId(`task-${id}`)).toHaveCount(0);
   await page.getByLabel("演示用户").selectOption("alice");
   await expect(success).toContainText("已完成");
+  await expect(page.getByTestId(`task-${bobId}`)).toHaveCount(0);
   // A transport failure must preserve server business state.
   await page.route("**/api/tasks", (route) =>
     route.request().method() === "GET"

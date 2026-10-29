@@ -146,16 +146,18 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-- 后端 13 个测试：真实 MockMvc + Flyway/H2 持久化闭环、快速受理、成功结果、三个失败阶段、顺序和后续不执行、终态不可逆、跨用户访问、无效素材、提交先于调度及队列拒绝处理。
+- 后端 14 个测试：真实 MockMvc + Flyway/H2 持久化闭环、快速受理、成功结果、三个失败阶段、顺序和后续不执行、终态不可逆、跨用户访问、无效素材、提交先于调度及队列拒绝处理。
 - 前端 8 个测试：多 ID 独立更新、HTTP 5xx / 网络故障保留状态、真实定时轮询终止、旧用户迟到请求隔离、202 后离开提交态、每槽上传状态与校验、图片身份头与 Object URL 回收。
 - Playwright 2 个集成场景：真实 API 阶段观测 / 二进制结果 / 1/2/3 素材 / 所有失败点；浏览器筛选 / 上传 / 多任务 / 刷新 / 身份 / 同步异常 / 移动端 / 404，并输出四张桌面与手机截图。
 - GitHub Actions 在 push / pull_request 执行 Node 22 前端全链、Java 21 test + package，另启真实 Compose/MySQL 8.4 执行 Playwright，检查数据库终态并归档截图、trace、MySQL 记录和容器日志。
 
 ### 实际验证记录（持续更新）
 
-- 本机 Windows / Java 21.0.7 / Node 24.11.0：后端 13 tests 通过，package 通过；前端 lint / typecheck / 8 tests / build 通过；npm audit 0 漏洞。
+- 本机 Windows / Java 21.0.7：后端 **14 tests** 与 package 通过。前端初始用 Node 24.11.0，随后下载独立 Node **22.23.4**，实际用 npm **10.9.9** 执行干净 `npm ci`，再运行 lint / typecheck / **8 tests** / build，全部通过；npm audit **0 漏洞**。
 - 本机缺 Docker CLI/Engine，WSL 未安装；未擅自安装需要系统重启的虚拟化功能。替代验证用既有 MySQL 8.0.42 二进制初始化**独立临时数据目录与 3307 端口**，未操作原有 MySQL 服务/数据；真实 API + 浏览器 2 场景通过。这不替代目标 MySQL 8.4 的容器验收。
-- GitHub Actions 的真实 Docker Compose 验收：已配置，首次推送后核验结果，尚不在此声称通过。
+- **真实 Docker Compose 已通过**：[Actions run 40854160684](https://github.com/Jasmine-wind/material-studio/actions/runs/40854160684)，对应应用 commit `32fa301`。Linux runner 中 `docker compose up --build -d --wait` 成功，MySQL **8.4.13** / Java / Next 三服务均 healthy；Node 22 前端校验、Java 14 tests + package、**2 个容器 Playwright 场景全部通过**。Flyway V1 success=1；SQL 实查 12 条任务（6 成功、6 失败，三个失败阶段各 2 条），均有 finishedAt，无遗留非终态；10 条上传记录。结果二进制与输入首图逐字节一致。
+- 已下载并审阅该 run 的 `compose-acceptance` artifact：含 compose-ps、容器日志、MySQL 记录、HTML 测试报告和四张界面截图。本机还通过 playwright-cli 手动操作 Bob 两槽上传 → 默认耗时提交 → 刷新观察处理中 → 成功结果，并检查 SQL 中 alice/bob 归属。**容器走查为自动化浏览器，本机交互走查为原生服务**，不混淆两种环境。
+- 初轮 CI `40852911668` 曾因 npm 跨平台可选依赖缺失而失败；从空 node_modules 重建 lockfile，修复 Node 22 测试中的 Blob realm 与异步通知断言时序后回归通过。没有隐藏失败记录。
 
 ## 交付、部署与回滚
 
@@ -163,7 +165,7 @@ npm run test:e2e
 
 部署：备份数据库和素材卷 → checkout 已验收 commit → 配置 `.env` → `docker compose up --build -d --wait` → 健康检查与冒烟测试。对公网使用需增加真实认证与 TLS（本题不实现）；勿将演示身份当成访问控制边界。回滚：保留旧镜像/commit，恢复旧版本并 up；本次仅 V1 初始迁移，不改已应用迁移，后续迁移需考虑兼容；破坏性变更先恢复数据库和素材的一致备份。`down -v` 不是回滚。
 
-验收 commit 及远程 CI 结果在最终验收后追加；也可用 `git log -1` 查询最终交付。现有远程：`https://github.com/Jasmine-wind/material-studio`。
+应用验收 commit：**`32fa301`**（上述 CI 已全绿）。后续仅补充 Bob 双向制作隔离的集成断言与交付记录，最终目录 commit 可用 `git log -1` 查询。已按仓库现有远程正常推送：**https://github.com/Jasmine-wind/material-studio**。
 
 ## 完成范围、限制与取舍
 
@@ -173,10 +175,10 @@ npm run test:e2e
 - 无真实 AI，产物为首图复制；不做真实认证、重试/删除、计费、队列中间件或管理后台。
 - 未引用的上传文件不会自动回收，取消请求时服务器可能已落盘；长期使用需离线运维清理。历史全量返回不分页，适合有限规模演示，不承诺大量生产任务吞吐。
 - 数据库与文件系统不是分布式事务，硬崩溃可能留下孤立文件；文件卷必须与数据库一起备份。
-- CI H2 快速测试不等于 MySQL 方言验收，另用真实 MySQL 容器覆盖。Docker 基础镜像使用主版本标签，应用依赖精确锁定；正式部署可进一步固定镜像 digest。
+- CI H2 快速测试不等于 MySQL 方言验收，已另用真实 MySQL 8.4 容器覆盖。Boot 管理的 Flyway 11.7.2 对 MySQL 8.4 输出“较新版本”兼容性提醒；实际迁移、业务 SQL、容器测试均通过，未忽略迁移错误。Docker 基础镜像使用主版本标签，应用依赖精确锁定；正式部署可进一步固定镜像 digest。
 
 ## 真实投入与 AI 工作流
 
-使用 OpenAI Codex（pi coding harness）完成开发，没有人工编造测试记录。2026-10-29 **09:21 UTC 开始**；当前约 30 分钟连续实施，最终验收时更新实际结束时间（这是本次会话墙钟投入，不是人工估算工时）。
+使用 OpenAI Codex（pi coding harness）完成开发，没有人工编造测试记录。2026-10-29 **09:21 UTC 开始**；**10:05 UTC 已完成首轮完整容器验收，约 44 分钟**，其后继续补充验收记录与回归（这是本次会话墙钟投入，不是人工估算工时）。
 
-执行方式：先完整读规格与空仓库/环境 → 最大纵向切片建立 Java/MySQL/Flyway 和原创素材 → 实现上传到终态的闭环并运行 13 个后端测试 → 实现前端三页面/身份/轮询，运行 RTL 与生产构建 → 使用独立 MySQL 和浏览器实测 → 发现测试将 Next 路由播报器误当业务 alert，限定到 main 后重新跑通 → npm audit 发现 Vitest mocker 漏洞，升级到 4.1.12 并重新验证 → CI 使用真正 Linux Docker 弥补本机缺引擎的限制 → 核验日志和数据库后完成交付。没有为展示技术增加题外业务；优先短事务、可观察状态、真实 IO 和可重复验证，而非额外架构层。
+执行方式：先完整读规格与空仓库/环境 → 最大纵向切片建立 Java/MySQL/Flyway 和原创素材 → 实现上传到终态的闭环并运行后端测试（最终 14 项） → 实现前端三页面/身份/轮询，运行 RTL 与生产构建 → 使用独立 MySQL 和浏览器实测 → 发现测试将 Next 路由播报器误当业务 alert，限定到 main 后重新跑通 → npm audit 发现 Vitest mocker 漏洞，升级到 4.1.12 并重新验证 → CI 使用真正 Linux Docker 弥补本机缺引擎的限制 → 核验日志和数据库后完成交付。没有为展示技术增加题外业务；优先短事务、可观察状态、真实 IO 和可重复验证，而非额外架构层。
