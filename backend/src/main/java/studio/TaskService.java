@@ -20,11 +20,13 @@ public class TaskService {
     private final ThreadPoolTaskExecutor executor;
     private final TransactionTemplate transaction;
     private final boolean demoEnabled;
+    private final FailureSettlement failures;
     public TaskService(StudioMapper mapper, Templates templates, Storage storage, TaskRunner runner,
                        ThreadPoolTaskExecutor executor, PlatformTransactionManager manager,
-                       @Value("${studio.demo-enabled}") boolean demoEnabled) {
+                       @Value("${studio.demo-enabled}") boolean demoEnabled, FailureSettlement failures) {
         this.mapper = mapper; this.templates = templates; this.storage = storage; this.runner = runner;
         this.executor = executor; this.transaction = new TransactionTemplate(manager); this.demoEnabled = demoEnabled;
+        this.failures = failures;
     }
     public Accepted create(String owner, CreateTask request) {
         var template = templates.get(request.templateId());
@@ -44,14 +46,20 @@ public class TaskService {
         var task = new Task();
         task.id = UUID.randomUUID().toString(); task.ownerId = owner; task.templateId = template.id();
         task.simulateFailStage = failStage; task.simulateDelayMs = delay;
-        transaction.executeWithoutResult(status -> {
-            mapper.insertTask(task);
-            for (int i = 0; i < request.assetIds().size(); i++) mapper.link(task.id, i, request.assetIds().get(i));
-        }); // Commit is complete before the task can be scheduled.
+        failures.reserve(task.id);
+        try {
+            transaction.executeWithoutResult(status -> {
+                mapper.insertTask(task);
+                for (int i = 0; i < request.assetIds().size(); i++) mapper.link(task.id, i, request.assetIds().get(i));
+            }); // Commit is complete before the task can be scheduled.
+        } catch (RuntimeException e) {
+            failures.complete(task.id);
+            throw e;
+        }
         try { executor.execute(() -> runner.run(task)); }
         catch (TaskRejectedException e) {
-            mapper.fail(task.id, "NONE", "服务繁忙，任务未能进入执行队列");
-            throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "QUEUE_FULL", "任务队列已满，本次任务已标记失败，请稍后再提交");
+            failures.fail(task.id, "NONE", "服务繁忙，任务未能进入执行队列");
+            throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "QUEUE_FULL", "任务队列已满，本次任务未执行；失败状态将自动结算，请稍后再提交");
         }
         return new Accepted(task.id, "QUEUED", "NONE");
     }

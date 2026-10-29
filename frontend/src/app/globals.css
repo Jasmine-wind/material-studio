@@ -697,7 +697,7 @@ summary > span {
 .stage-track > div {
   flex: 1;
   font-size: 10px;
-  color: #676872;
+  color: var(--muted);
 }
 .stage-track span {
   display: block;

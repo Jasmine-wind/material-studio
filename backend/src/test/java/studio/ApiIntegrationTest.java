@@ -115,6 +115,10 @@ class ApiIntegrationTest {
                 .header("X-Demo-User","bob")).andExpect(status().isCreated()).andExpect(jsonPath("$.mimeType").value("image/jpeg"));
         mvc.perform(get("/api/unknown").header("X-Demo-User","alice")).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
+    @Test void unsupportedMediaTypeIs415NotServerFailure() throws Exception {
+        mvc.perform(post("/api/tasks").header("X-Demo-User", "alice").contentType("text/plain").content("{}"))
+                .andExpect(status().isUnsupportedMediaType()).andExpect(jsonPath("$.code").value("UNSUPPORTED_MEDIA_TYPE"));
+    }
     @Test void uploadValidation() throws Exception {
         for (var file : List.of(new MockMultipartFile("file","bad.png","image/png","not image".getBytes()),
                 new MockMultipartFile("file","bad.jpg","image/jpeg",png()),

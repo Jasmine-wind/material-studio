@@ -21,7 +21,9 @@ class TaskRunnerTest {
         when(mapper.inputs("task")).thenReturn(List.of(input));
         when(mapper.startStage(anyString(),anyString(),anyString(),anyString())).thenReturn(1);
         var task = new Models.Task(); task.id="task"; task.simulateFailStage=failedStage;
-        new TaskRunner(mapper,storage).run(task);
+        var failures = new FailureSettlement(mapper);
+        failures.reserve(task.id);
+        new TaskRunner(mapper,storage,failures).run(task);
         var order = inOrder(mapper);
         order.verify(mapper).inputs("task");
         String previous="NONE";
@@ -44,7 +46,9 @@ class TaskRunnerTest {
         when(mapper.inputs("task")).thenReturn(List.of(input));
         when(mapper.startStage(anyString(),anyString(),anyString(),anyString())).thenReturn(0);
         var task=new Models.Task();task.id="task";
-        new TaskRunner(mapper,new Storage(root.toString())).run(task);
+        var failures = new FailureSettlement(mapper);
+        failures.reserve(task.id);
+        new TaskRunner(mapper,new Storage(root.toString()),failures).run(task);
         verify(mapper,never()).succeed(anyString(),anyString());
         verify(mapper,never()).fail(anyString(),anyString(),anyString());
     }

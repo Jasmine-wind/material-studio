@@ -47,6 +47,8 @@ jobs:
       - run: docker compose config --quiet && docker compose up --build -d --wait --wait-timeout 240
       - run: npm ci && npx playwright install --with-deps chromium && npm run test:e2e
         working-directory: frontend
+      - name: Review Gate transient database write fault (disposable Compose database only)
+        run: python3 scripts/review-gate-db.py
       - name: Verify persisted MySQL states
         run: |
           mkdir -p artifacts

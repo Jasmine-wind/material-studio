@@ -22,7 +22,7 @@ class TaskServiceTest {
         var asset=new Models.Asset();asset.mimeType="image/png";asset.sizeBytes=3;asset.storageKey="input.png";
         Files.write(storage.upload("input.png"),new byte[]{1,2,3}); when(mapper.asset("a","alice")).thenReturn(asset);
         doThrow(new TaskRejectedException("full")).when(executor).execute(any(Runnable.class));
-        var service=new TaskService(mapper,templates,storage,runner,executor,manager,true);
+        var service=new TaskService(mapper,templates,storage,runner,executor,manager,true,new FailureSettlement(mapper));
         assertThatThrownBy(()->service.create("alice",new Models.CreateTask("x",List.of("a"),null))).isInstanceOf(ApiError.class);
         var order=inOrder(manager,mapper,executor);
         order.verify(mapper).asset("a","alice");
@@ -30,7 +30,7 @@ class TaskServiceTest {
         order.verify(manager).commit(any()); order.verify(executor).execute(any(Runnable.class));
         order.verify(mapper).fail(anyString(),eq("NONE"),contains("服务繁忙"));
         verifyNoInteractions(runner);
-        var disabled=new TaskService(mapper,templates,storage,runner,executor,manager,false);
+        var disabled=new TaskService(mapper,templates,storage,runner,executor,manager,false,new FailureSettlement(mapper));
         assertThatThrownBy(()->disabled.create("alice",new Models.CreateTask("x",List.of("a"),new Models.Simulation(null,0))))
                 .isInstanceOf(ApiError.class).hasMessageContaining("未启用");
     }

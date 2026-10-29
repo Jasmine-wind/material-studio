@@ -10,6 +10,7 @@ import org.springframework.web.multipart.support.MissingServletRequestPartExcept
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 
 @RestControllerAdvice
 public class ErrorHandler {
@@ -23,6 +24,11 @@ public class ErrorHandler {
             HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class, MissingRequestHeaderException.class})
     ResponseEntity<ErrorBody> invalid(Exception e) {
         return ResponseEntity.badRequest().body(new ErrorBody("INVALID_REQUEST", "请求格式错误或文件超过 10MB 限制"));
+    }
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    ResponseEntity<ErrorBody> unsupportedMediaType(HttpMediaTypeNotSupportedException e) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body(new ErrorBody("UNSUPPORTED_MEDIA_TYPE", "不支持的 Content-Type，请按接口要求发送 JSON 或 multipart/form-data"));
     }
     @ExceptionHandler(Exception.class)
     ResponseEntity<ErrorBody> unexpected(Exception e) {

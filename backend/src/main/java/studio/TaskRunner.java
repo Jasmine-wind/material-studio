@@ -2,6 +2,7 @@ package studio;
 
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DataAccessException;
 import java.nio.file.*;
 import java.util.List;
 import static studio.Models.*;
@@ -12,7 +13,10 @@ public class TaskRunner {
     public static final List<String> STAGES = List.of("CHECK_MATERIAL", "GENERATE", "FINALIZE");
     private final StudioMapper mapper;
     private final Storage storage;
-    public TaskRunner(StudioMapper mapper, Storage storage) { this.mapper = mapper; this.storage = storage; }
+    private final FailureSettlement failures;
+    public TaskRunner(StudioMapper mapper, Storage storage, FailureSettlement failures) {
+        this.mapper = mapper; this.storage = storage; this.failures = failures;
+    }
     public void run(Task task) {
         String stage = "NONE";
         Path temporary = storage.temporary(task.id);
@@ -23,7 +27,10 @@ public class TaskRunner {
             String resultKey = task.id + (inputs.getFirst().mimeType.equals("image/png") ? ".png" : ".jpg");
             for (String next : STAGES) {
                 stage = next;
-                if (mapper.startStage(task.id, previous, stage, previous.equals("NONE") ? "QUEUED" : "RUNNING") != 1) return;
+                if (mapper.startStage(task.id, previous, stage, previous.equals("NONE") ? "QUEUED" : "RUNNING") != 1) {
+                    failures.complete(task.id);
+                    return;
+                }
                 Thread.sleep(task.simulateDelayMs);
                 if (stage.equals(task.simulateFailStage)) throw new IllegalStateException("演示：" + stage + " 阶段指定失败");
                 switch (stage) {
@@ -38,11 +45,14 @@ public class TaskRunner {
                 previous = stage;
             }
             mapper.succeed(task.id, resultKey);
+            failures.complete(task.id);
         } catch (Exception e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             LoggerFactory.getLogger(TaskRunner.class).warn("Task {} failed at {}", task.id, stage, e);
-            String message = e instanceof IllegalStateException ? e.getMessage() : "处理异常，请检查素材或服务日志";
-            mapper.fail(task.id, stage, message);
+            String message = e instanceof DataAccessException db
+                    ? "数据库状态访问失败，制作已停止：" + db.getMostSpecificCause().getMessage()
+                    : e instanceof IllegalStateException ? e.getMessage() : "处理异常，请检查素材或服务日志";
+            failures.fail(task.id, stage, message);
         } finally {
             try { Files.deleteIfExists(temporary); } catch (Exception e) { LoggerFactory.getLogger(TaskRunner.class).warn("Temporary cleanup failed", e); }
         }

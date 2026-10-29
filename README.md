@@ -1,6 +1,6 @@
 # 素材工坊 · Material Studio
 
-一个可独立运行的招聘笔试作品：选择模板 → 上传真实图片 → 异步受理 → 三阶段制作 → 成功预览 / 指定阶段失败 → 个人历史。需求基准见 [EXAM_SPEC.md](EXAM_SPEC.md)。不包含会员、支付、真实 AI 或账号系统。
+一个可独立运行的招聘笔试作品：选择模板 → 上传真实图片 → 异步受理 → 三阶段制作 → 成功预览 / 指定阶段失败 → 个人历史。最高需求依据为 [原题 R-01～R-14](docs/EXAM_ORIGINAL.md)，[EXAM_SPEC.md](EXAM_SPEC.md) 是实现细化决策，不将其额外约束冒充招聘方要求。不包含会员、支付、真实 AI 或账号系统。
 
 ## 技术与目录
 
@@ -108,7 +108,7 @@ curl -H 'X-Demo-User: alice' "$API/tasks/$TASK_ID/result" -o result.png
 curl -i -H 'X-Demo-User: bob' "$API/tasks/$TASK_ID" # 非本人 404
 ```
 
-任务响应含 `id,templateId,templateTitle,status,stage,failedStage,errorMessage,resultUrl,createdAt,updatedAt,finishedAt`；未就绪字段 null。统一错误 `{code,message}`：参数 400、资源不存在 / 越权 404、结果未就绪 409、队列满 503、服务故障 5xx。生产部署应关闭模拟开关，不应公开这个演示身份服务。
+任务响应含 `id,templateId,templateTitle,status,stage,failedStage,errorMessage,resultUrl,createdAt,updatedAt,finishedAt`；未就绪字段 null。统一错误 `{code,message}`：参数 400、资源不存在 / 越权 404、结果未就绪 409、不支持的 Content-Type 415、队列/结算积压 503、服务故障 5xx。生产部署应关闭模拟开关，不应公开这个演示身份服务。
 
 ## 异步状态机与可靠性
 
@@ -124,7 +124,8 @@ QUEUED / NONE
 - 请求校验模板、数量、素材归属、格式、大小、文件存在；短事务插入任务和有序引用。`TransactionTemplate` 返回即已提交，之后才向 2 worker / 20 queue 的 `ThreadPoolTaskExecutor` 投递；不依赖自调用 `@Async`。
 - 独立 TaskRunner 每阶段开始执行一条条件更新，MyBatis 独立 session 自动提交；延迟 / 文件操作完全在事务外。预期旧 stage/status 条件确保顺序；成功和失败更新都不能覆盖终态。
 - `GENERATE` 复制第一张素材至结果卷临时文件，`FINALIZE` 同文件系统原子移动。阶段失败立即中断，finally 清理临时文件。真实异常同样记录 FAILED；日志保留诊断信息。
-- executor 拒绝时先将已创建任务记为 FAILED / NONE，再返回 503，不留无解释假排队。客户端遇提交网络异常不自动重试（可能已经受理），可同步历史核实，避免盲目重复提交。
+- executor 拒绝时共用 `FailureSettlement` 结算 FAILED / NONE，返回 503；若数据库暂不可写，明确提示失败状态将自动结算，不谎报已经落库。客户端遇提交网络异常不自动重试（可能已经受理），可同步历史核实，避免盲目重复提交。
+- `FailureSettlement` 只重试失败状态 UPDATE，绝不重跑制作。首次写回失败后由独立单线程以 1/2/4/8/16/30 秒退避继续尝试（250ms 检查节拍），制作线程不循环等待；原任务 ID、失败阶段、原因固定，不被重试异常替换。沿用条件 SQL，已成功或失败的任务不被覆盖。任务 INSERT 前预留结算位置，最多 128 个运行/待结算记录；满时 503 `FAILURE_SETTLEMENT_FULL`，不再创建任务，避免长期故障造成无界积压。成功、终态不再可更新或事务创建失败时释放预留。日志包含 task、failedStage、attempt、retryInSeconds、reservations 及结算结果。
 - GET 只读，不推进状态。前端以服务端字段为唯一业务真相；查询错误与业务失败分离，多任务按 ID 渲染。缓存键包含 userId；所有 fetch 接收 AbortSignal，用户切换取消查询并重建工作区，上传 / 提交 / 图片请求卸载中止。
 
 ## 测试、构建与 CI
@@ -146,9 +147,9 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-- 后端 14 个测试：真实 MockMvc + Flyway/H2 持久化闭环、快速受理、成功结果、三个失败阶段、顺序和后续不执行、终态不可逆、跨用户访问、无效素材、提交先于调度及队列拒绝处理。
+- 后端 21 个测试：原有 14 项闭环测试，加 415 媒体类型回归及 6 项数据库失败结算测试（真实 MyBatis + H2 UPDATE trigger）：阶段及失败写回都失败后恢复、保留原模拟失败原因、两种既有终态不被覆盖、队列拒绝写回恢复、容量满时先拒绝创建并可释放。
 - 前端 8 个测试：多 ID 独立更新、HTTP 5xx / 网络故障保留状态、真实定时轮询终止、旧用户迟到请求隔离、202 后离开提交态、每槽上传状态与校验、图片身份头与 Object URL 回收。
-- Playwright 2 个集成场景：真实 API 阶段观测 / 二进制结果 / 1/2/3 素材 / 所有失败点；浏览器筛选 / 上传 / 多任务 / 刷新 / 身份 / 同步异常 / 移动端 / 404，并输出四张桌面与手机截图。
+- Playwright 3 个集成场景：新增渲染后 AA 对比度 / 415 回归；原有场景包括真实 API 阶段观测 / 二进制结果 / 1/2/3 素材 / 所有失败点；浏览器筛选 / 上传 / 多任务 / 刷新 / 身份 / 同步异常 / 移动端 / 404，并输出四张桌面与手机截图。
 - GitHub Actions 在 push / pull_request 执行 Node 22 前端全链、Java 21 test + package，另启真实 Compose/MySQL 8.4 执行 Playwright，检查数据库终态并归档截图、trace、MySQL 记录和容器日志。
 
 ### 实际验证记录（持续更新）
@@ -165,13 +166,13 @@ npm run test:e2e
 
 部署：备份数据库和素材卷 → checkout 已验收 commit → 配置 `.env` → `docker compose up --build -d --wait` → 健康检查与冒烟测试。对公网使用需增加真实认证与 TLS（本题不实现）；勿将演示身份当成访问控制边界。回滚：保留旧镜像/commit，恢复旧版本并 up；本次仅 V1 初始迁移，不改已应用迁移，后续迁移需考虑兼容；破坏性变更先恢复数据库和素材的一致备份。`down -v` 不是回滚。
 
-功能验收 commit：**`e97d8f589ddf51e486bffcd37016087521550827`**（前端、后端、Compose 三个 CI job 全绿）。其后的提交仅更新本 README 验收证据，不改源码；最终目录 commit 可用 `git log -1` 查询。已按仓库现有远程正常推送：**https://github.com/Jasmine-wind/material-studio**。
+初次开发功能验收 commit：**`e97d8f589ddf51e486bffcd37016087521550827`**（当时前端、后端、Compose 三个 CI job 全绿）。Review Gate 整改记录见下文，最终目录 commit 可用 `git log -1` 查询。已按仓库现有远程正常推送：**https://github.com/Jasmine-wind/material-studio**。
 
 ## 完成范围、限制与取舍
 
-已实现规格内模板、真实上传、异步三阶段、确定性失败、个人历史、结果保护、多任务隔离、轮询生命周期、刷新恢复、用户切换、响应式界面、关键测试、Docker/CI 配置及素材交付（对应规格汇总 R-01～R-14；仓库没有额外原题 R 编号明细，不虚构逐条映射）。
+已实现模板、真实上传、异步三阶段、确定性失败、个人历史、结果保护、多任务隔离、轮询生命周期、刷新恢复、用户切换、响应式界面、关键测试、Docker/CI 配置及素材交付。原题已由用户补入，逐条实现/验证映射见下文；演示身份符合 R-10 自行设计身份的要求，不增加真实认证。
 
-- **没有进程重启自动恢复**：Java 重启前 QUEUED/RUNNING 记录保持可查询，但不会继续；浏览器刷新恢复的是查询，不是重启执行。可能需要人工清理；单进程 demo 无分布式保证。数据库写入故障 / 硬退出也可能留下非终态。
+- **没有进程重启自动恢复**：Java 重启前 QUEUED/RUNNING 记录保持可查询，但不会继续；浏览器刷新恢复的是查询，不是重启执行。可能需要人工清理；单进程 demo 无分布式保证。当前进程内已捕获的失败会在数据库恢复后自动结算；硬退出、启动前的旧悬挂任务或数据库提交结果不明的崩溃边界不属于本次进程内重试保证。
 - 无真实 AI，产物为首图复制；不做真实认证、重试/删除、计费、队列中间件或管理后台。
 - 未引用的上传文件不会自动回收，取消请求时服务器可能已落盘；长期使用需离线运维清理。历史全量返回不分页，适合有限规模演示，不承诺大量生产任务吞吐。
 - 数据库与文件系统不是分布式事务，硬崩溃可能留下孤立文件；文件卷必须与数据库一起备份。
@@ -182,3 +183,39 @@ npm run test:e2e
 使用 OpenAI Codex（pi coding harness）完成开发，没有人工编造测试记录。2026-10-29 **09:21 UTC 开始**；**10:11 UTC 完成最终功能回归，约 50 分钟**（10:05 UTC 首轮容器通过，随后补充 Bob 双向隔离并再次跑通容器）；之后仅归档本 README 和等待交付提交的 CI。这是本次会话墙钟投入，不是人工估算工时。
 
 执行方式：先完整读规格与空仓库/环境 → 最大纵向切片建立 Java/MySQL/Flyway 和原创素材 → 实现上传到终态的闭环并运行后端测试（最终 14 项） → 实现前端三页面/身份/轮询，运行 RTL 与生产构建 → 使用独立 MySQL 和浏览器实测 → 发现测试将 Next 路由播报器误当业务 alert，限定到 main 后重新跑通 → npm audit 发现 Vitest mocker 漏洞，升级到 4.1.12 并重新验证 → CI 使用真正 Linux Docker 弥补本机缺引擎的限制 → 核验日志和数据库后完成交付。没有为展示技术增加题外业务；优先短事务、可观察状态、真实 IO 和可重复验证，而非额外架构层。
+
+## 原题验收映射（Review Gate 补齐）
+
+原题来源：用户补入的根目录 `EXAM_ORIGINAL.md`，原样复制到 `docs/EXAM_ORIGINAL.md`，保留原始 R 编号、否定性要求及参考链接。未用审查员建议重定义条款。下表是开发方可追溯映射，不代替独立审查员的最终签署。
+
+| 原条款 | 实现证据 | 可重复验证 |
+|---|---|---|
+| R-01 技术栈与职责 | `frontend/src/app`、Java `ApiController/TaskService/StudioMapper`、Flyway V1；Next 仅代理 | 前后端构建、Compose MySQL 记录 |
+| R-02 模板列表与模拟数据 | Java `Templates` + `templates.json`；`app/page.tsx` 分类/卡片；`public/demo` 本地素材 | `ApiIntegrationTest.templatesIdentityAnd404`、`studio.spec.ts` 筛选/封面可达 |
+| R-03 详情/上传/校验 | 详情页、`UploadSlot/Maker`；Java `Storage` 与提交时再校验 | 上传/Maker RTL、API 无效素材测试、1/2/3 张 E2E、404/错误/空列表原探针 |
+| R-04 异步受理 | `TaskService` 事务完成后 executor；独立 `TaskRunner`，不依赖浏览器 | 快速受理/提交先于调度测试、容器 API E2E |
+| R-05 顺序阶段/持久化/只读查询 | `TaskRunner`、`StudioMapper` 独立短更新；受保护结果接口 | InOrder 与真实阶段观测、重复 GET、终态保护测试 |
+| R-06 指定失败/耗时 | simulation 参数及页面演示控件，失败立即中断；`FailureSettlement` 仅补写失败 | 三阶段失败测试及 E2E；本 README 演示步骤 |
+| R-07 状态/请求异常 | 上传/提交请求状态独立；`TaskList` 只读业务状态，保留查询失败前数据 | Maker 202、HTTP5xx/网络故障 RTL、浏览器断网响应恢复 |
+| R-08 多任务/生命周期 | 按 ID 渲染；userId 缓存键、AbortSignal；有未完成任务才轮询聚合历史 | 多 ID/迟到响应/停轮询 RTL；用户切换 E2E；不要求额外 SSE/MQ |
+| R-09 历史/刷新/预览 | `/history` 读 Java/MySQL，时间本地化；带身份的 Blob 图片 | 刷新处理中/成功结果 naturalWidth 及二进制一致性 E2E |
+| R-10 自行设计身份 | alice/bob 白名单、localStorage 选择、每请求身份头、owner 过滤 | Bob 独立制作与双向隔离、素材/任务/结果越权404；已披露非真实认证 |
+| R-11 布局/小屏/语义 | 三路由、分类高卡、左制作右历史；label/alt/focus；仅调亮阶段小字 | 桌面/390px E2E 截图；原探针和新增浏览器对比度测试 |
+| R-12 CI/关键测试 | `.github/workflows/ci.yml` push/PR；JUnit、RTL 核心行为测试 | Java test/package、前端 lint/typecheck/test/build；E2E 为自选补充，非原题强制 |
+| R-13 完整交付/说明 | 源码、lockfile、迁移、JSON 种子、本地图片和本 README | Git diff/交付文件检查；启动/API/模拟/身份/投入/AI/回滚均有说明 |
+| R-14 推荐容器交付 | Compose 三服务、Dockerfile、健康检查、命名卷、`.env.example` | `docker compose up --build -d --wait` 及 CI 容器验收 |
+
+复用范围：未复用第三方业务项目或整套 UI；使用上述 npm/Maven 开源框架和测试库、Apache 官方 Maven Wrapper（脚本保留其许可头）。封面/示例图由项目脚本用 Pillow 绘制；不调用真实 AI，不使用付费或内部素材。原题没有要求真实认证、三个独立延迟字段、重启续跑、幂等、自动重试制作或复杂消息系统，本次均不扩展。
+
+## Review Gate 整改与复验
+
+基线：`7fd1f6d2d17ae7c1868acbd094725f9003257ef6`；输入为独立报告 `F:/material-studio-review/REVIEW.md`。本次从 **2026-10-29 10:40 UTC** 开始，先执行原报告脚本见红，再加回归测试、局部修复及重跑；完成时间和容器结果在验证后追加。没有改写独立报告，也没有把本会话自查称为独立复审。
+
+- **P1-01 原始复现**：`node F:/material-studio-review/db-fault-repro.cjs` 修复前 exit 1，任务 `75d8d019-5757-4bdf-9581-255666da3279` 在 DB 恢复后仍 RUNNING。修复后原脚本 exit 0，任务 `c120d10a-6536-42a6-8533-16fe63906274` 自动 FAILED / failedStage=GENERATE，保留 `review transient database write outage` 与 finishedAt。进程在该场景中持续运行，无 GET 推进。原审查产物已还原，新增日志单独放在 `F:/material-studio-regate/`。
+- **根因/修复**：阶段 UPDATE 抛错后，catch 内的 FAILED UPDATE 再次抛错，使工作线程退出且没有待结算信息。现在两个失败入口共用一个有界、进程内失败结算器；业务步骤中断后只重试原失败写回。无需新数据库表、依赖或恢复框架。
+- **P2-01**：原媒体类型探针 500→415；新增 MockMvc 和真实浏览器 API 断言。
+- **P2-02**：CSS 仅一处 `#676872` 改为现有 `--muted`；原浏览器 computed style 对比度 **3.1486→5.8588:1**，10px 普通文本达到 AA 4.5:1。不是全站 WCAG 认证，没有改布局/字体。
+- 本地 Java21 的测试/构建、Node22 前端校验/构建、原始 P2 四项探针及 3 个 Playwright 场景已实际运行。新增 H2 UPDATE trigger 回归也验证制作线程释放、失败原因不被重试异常替换、两种既有终态不可覆盖和拒绝执行结算。
+- 真实 MySQL 容器故障回归：新增 `python3 scripts/review-gate-db.py`，**仅限可丢弃 Compose 验收数据**；临时阻止 tasks UPDATE，finally 删除 trigger，使用 SQL 等待终态、期间不发 GET/不重启。覆盖阶段写入和失败写回同时故障，以及模拟失败原原因保留。CI 在正常 E2E 后执行并归档 `artifacts/review-gate-db.json`。不要对生产/共享库运行；脚本被强杀时需手动删除其 `regate_transient_write_outage` trigger。
+
+剩余边界：结算记录只在内存中，进程终止会丢失；启动前遗留的悬挂记录不自动修复。数据库永久不可写时不会伪造 FAILED 已落库，而是保留最多 128 个预留并退避、记录日志、拒绝新的超额提交；单次 JDBC 操作仍受连接/驱动超时约束。原始异常完整记录在日志，可理解原因按现有数据库 500 字符字段保存。仅重试终态写回，不自动重试制作。
