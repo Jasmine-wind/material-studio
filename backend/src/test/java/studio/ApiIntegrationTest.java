@@ -24,6 +24,7 @@ class ApiIntegrationTest {
     @Autowired ObjectMapper json;
     @Autowired StudioMapper mapper;
     @Autowired Storage storage;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     byte[] png() throws IOException {
         var out = new ByteArrayOutputStream();
         ImageIO.write(new BufferedImage(8, 8, BufferedImage.TYPE_INT_RGB), "png", out);
@@ -102,6 +103,18 @@ class ApiIntegrationTest {
         create("alice","lunar",List.of(asset),null,0,400);
     }
     void FilesDelete(String asset) throws IOException { storage.removeUpload(mapper.asset(asset,"alice").storageKey); }
+    @Test void revalidatesStoredMimeAndSizeAndAcceptsJpeg() throws Exception {
+        String asset = upload("alice");
+        jdbc.update("UPDATE assets SET mime_type='text/plain' WHERE id=?", asset);
+        create("alice","lunar",List.of(asset),null,0,400);
+        jdbc.update("UPDATE assets SET mime_type='image/png',size_bytes=? WHERE id=?",Storage.MAX_BYTES+1,asset);
+        create("alice","lunar",List.of(asset),null,0,400);
+        var out = new ByteArrayOutputStream();
+        ImageIO.write(new BufferedImage(8,8,BufferedImage.TYPE_INT_RGB),"jpeg",out);
+        mvc.perform(multipart("/api/assets").file(new MockMultipartFile("file","sample.jpg","image/jpeg",out.toByteArray()))
+                .header("X-Demo-User","bob")).andExpect(status().isCreated()).andExpect(jsonPath("$.mimeType").value("image/jpeg"));
+        mvc.perform(get("/api/unknown").header("X-Demo-User","alice")).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
     @Test void uploadValidation() throws Exception {
         for (var file : List.of(new MockMultipartFile("file","bad.png","image/png","not image".getBytes()),
                 new MockMultipartFile("file","bad.jpg","image/jpeg",png()),
