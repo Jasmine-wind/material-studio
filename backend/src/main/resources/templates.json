@@ -1,0 +1,80 @@
+[
+  {
+    "id": "lunar",
+    "title": "月下漫游",
+    "category": "灵感海报",
+    "coverUrl": "/demo/lunar.jpg",
+    "description": "让平凡瞬间，拥有一场月光的想象。",
+    "requiredImageCount": 1,
+    "acceptedMimeTypes": [
+      "image/png",
+      "image/jpeg"
+    ],
+    "maxFileSizeBytes": 10485760
+  },
+  {
+    "id": "dune",
+    "title": "旷野来信",
+    "category": "旅行手记",
+    "coverUrl": "/demo/dune.jpg",
+    "description": "将沿途的风景，装进自己的旅行手记。",
+    "requiredImageCount": 2,
+    "acceptedMimeTypes": [
+      "image/png",
+      "image/jpeg"
+    ],
+    "maxFileSizeBytes": 10485760
+  },
+  {
+    "id": "bloom",
+    "title": "花间序曲",
+    "category": "生活拼贴",
+    "coverUrl": "/demo/bloom.jpg",
+    "description": "收集生活里，三个值得停留的片刻。",
+    "requiredImageCount": 3,
+    "acceptedMimeTypes": [
+      "image/png",
+      "image/jpeg"
+    ],
+    "maxFileSizeBytes": 10485760
+  },
+  {
+    "id": "tide",
+    "title": "蓝色潮汐",
+    "category": "旅行手记",
+    "coverUrl": "/demo/tide.jpg",
+    "description": "以一抹深蓝，记录与海相遇的时刻。",
+    "requiredImageCount": 1,
+    "acceptedMimeTypes": [
+      "image/png",
+      "image/jpeg"
+    ],
+    "maxFileSizeBytes": 10485760
+  },
+  {
+    "id": "orbit",
+    "title": "轨道之外",
+    "category": "灵感海报",
+    "coverUrl": "/demo/orbit.jpg",
+    "description": "两张灵感，在此交汇成新的视角。",
+    "requiredImageCount": 2,
+    "acceptedMimeTypes": [
+      "image/png",
+      "image/jpeg"
+    ],
+    "maxFileSizeBytes": 10485760
+  },
+  {
+    "id": "still",
+    "title": "日常留白",
+    "category": "生活拼贴",
+    "coverUrl": "/demo/still.jpg",
+    "description": "把日常的小小美好，留在这一帧。",
+    "requiredImageCount": 3,
+    "acceptedMimeTypes": [
+      "image/png",
+      "image/jpeg"
+    ],
+    "maxFileSizeBytes": 10485760
+  }
+]

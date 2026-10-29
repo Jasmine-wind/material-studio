@@ -1,0 +1,28 @@
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { afterEach, expect, it, vi } from 'vitest';
+import { Maker } from './maker';
+import type { Asset, Template } from '@/lib/api';
+vi.mock('./providers',()=>({useUser:()=>'alice'}));
+vi.mock('./upload-slot',()=>({UploadSlot:({index,onChange}:{index:number;onChange:(i:number,a:Asset,b:boolean)=>void})=><button onClick={()=>onChange(index,{id:'asset-'+index,mimeType:'image/png',sizeBytes:1,previewUrl:'/asset'},false)}>上传素材 {index+1}</button>}));
+const template:Template={id:'dune',title:'旷野来信',category:'旅行手记',coverUrl:'/demo/dune.jpg',description:'',requiredImageCount:2,acceptedMimeTypes:['image/png'],maxFileSizeBytes:10};
+afterEach(()=>vi.unstubAllGlobals());
+it('validates slots, prevents duplicate submission, leaves submitting immediately after 202 and allows another task',async()=>{
+  let resolve!: (r:Response)=>void;
+  const fetcher=vi.fn(()=>new Promise<Response>(r=>{resolve=r;}));vi.stubGlobal('fetch',fetcher);
+  const client=new QueryClient();
+  render(<QueryClientProvider client={client}><Maker template={template}/></QueryClientProvider>);
+  expect(screen.getByRole('button',{name:/开始制作/})).toBeDisabled();
+  fireEvent.click(screen.getByText('上传素材 1'));
+  expect(screen.getByRole('button',{name:/开始制作/})).toBeDisabled();
+  fireEvent.click(screen.getByText('上传素材 2'));
+  fireEvent.click(screen.getByRole('button',{name:/开始制作/}));
+  expect(await screen.findByRole('button',{name:/正在提交/})).toBeDisabled();
+  await act(async()=>{resolve(new Response(JSON.stringify({id:'accepted-123',status:'QUEUED'}),{status:202}));});
+  expect(await screen.findByText(/已受理 #accepted/)).toBeInTheDocument();
+  expect(screen.queryByText('正在提交…')).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{name:/开始制作/})).toBeEnabled();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  const init=fetcher.mock.calls[0] as unknown as [string,RequestInit];
+  expect(JSON.parse(init[1].body as string)).toEqual({templateId:'dune',assetIds:['asset-0','asset-1']});
+});

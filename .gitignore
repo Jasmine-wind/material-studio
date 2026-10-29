@@ -1,0 +1,15 @@
+node_modules/
+.next/
+coverage/
+target/
+storage/
+.env
+*.log
+.playwright-cli/
+artifacts/
+.tools/
+.DS_Store
+*.tsbuildinfo
+playwright-report/
+test-results/
+frontend-audit.json

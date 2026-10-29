@@ -1,0 +1,27 @@
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { UploadSlot } from './upload-slot';
+import type { Template } from '@/lib/api';
+vi.mock('./providers',()=>({useUser:()=>'alice'}));
+const template:Template={id:'x',title:'X',description:'',category:'C',coverUrl:'/x',requiredImageCount:2,acceptedMimeTypes:['image/png','image/jpeg'],maxFileSizeBytes:10};
+beforeEach(()=>{URL.createObjectURL=vi.fn(()=> 'blob:preview');URL.revokeObjectURL=vi.fn();});
+afterEach(()=>vi.unstubAllGlobals());
+it('tracks upload and validation per slot, saves actual server asset IDs and releases previews',async()=>{
+  let finish!: (r:Response)=>void;
+  vi.stubGlobal('fetch',vi.fn(()=>new Promise<Response>(r=>{finish=r;})));
+  const change=vi.fn();
+  const view=render(<><UploadSlot index={0} template={template} disabled={false} onChange={change}/><UploadSlot index={1} template={template} disabled={false} onChange={change}/></>);
+  const first=screen.getByLabelText('选择素材 1');
+  fireEvent.change(first,{target:{files:[new File(['x'],'x.png',{type:'image/png'})]}});
+  expect(first).toBeDisabled();
+  expect(screen.getByLabelText('选择素材 2')).toBeEnabled();
+  fireEvent.change(screen.getByLabelText('选择素材 2'),{target:{files:[new File(['x'],'bad.txt',{type:'text/plain'})]}});
+  expect(screen.getByRole('alert')).toHaveTextContent('PNG / JPEG');
+  await act(async()=>{finish(new Response(JSON.stringify({id:'persisted',mimeType:'image/png',sizeBytes:1,previewUrl:'/asset'}),{status:201}));});
+  await waitFor(()=>expect(first).toBeEnabled());
+  expect(change).toHaveBeenCalledWith(0,expect.objectContaining({id:'persisted'}),false);
+  fireEvent.click(screen.getByRole('button',{name:'移除素材 1'}));
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
+  expect(change).toHaveBeenLastCalledWith(0,null,false);
+  view.unmount();
+});

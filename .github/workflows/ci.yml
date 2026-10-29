@@ -1,0 +1,71 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint && npm run typecheck && npm run test && npm run build
+      - run: npm audit
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - run: ./mvnw -B test && ./mvnw -B package
+  compose-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: docker compose config --quiet && docker compose up --build -d --wait --wait-timeout 240
+      - run: npm ci && npx playwright install --with-deps chromium && npm run test:e2e
+        working-directory: frontend
+      - name: Verify persisted MySQL states
+        run: |
+          mkdir -p artifacts
+          docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -u studio material_studio -e "SELECT version,success FROM flyway_schema_history; SELECT owner_id,template_id,status,stage,failed_stage,finished_at FROM tasks ORDER BY created_at; SELECT COUNT(*) AS stored_assets FROM assets;"' | tee artifacts/mysql-records.txt
+          n=$(docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -N -u studio material_studio -e "SELECT COUNT(*) FROM tasks WHERE status IN (\"QUEUED\",\"RUNNING\") OR (status IN (\"SUCCEEDED\",\"FAILED\") AND finished_at IS NULL);"')
+          test "$n" = 0
+      - name: Collect container logs
+        if: always()
+        run: |
+          mkdir -p artifacts
+          docker compose ps -a > artifacts/compose-ps.txt
+          docker compose logs --no-color > artifacts/compose.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compose-acceptance
+          path: |
+            artifacts/
+            frontend/playwright-report/
+            frontend/test-results/
+      - run: docker compose down -v
+        if: always()
