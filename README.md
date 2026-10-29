@@ -209,13 +209,19 @@ npm run test:e2e
 
 ## Review Gate 整改与复验
 
-基线：`7fd1f6d2d17ae7c1868acbd094725f9003257ef6`；输入为独立报告 `F:/material-studio-review/REVIEW.md`。本次从 **2026-10-29 10:40 UTC** 开始，先执行原报告脚本见红，再加回归测试、局部修复及重跑；完成时间和容器结果在验证后追加。没有改写独立报告，也没有把本会话自查称为独立复审。
+基线：`7fd1f6d2d17ae7c1868acbd094725f9003257ef6`；输入为独立报告 `F:/material-studio-review/REVIEW.md`。本次从 **2026-10-29 10:40 UTC** 开始，先执行原报告脚本见红，再加回归测试、局部修复及重跑；**11:07 UTC 完成功能及容器复验，约 27 分钟**，之后仅归档证据与等待文档提交 CI。没有改写独立报告，也没有把本会话自查称为独立复审。
 
 - **P1-01 原始复现**：`node F:/material-studio-review/db-fault-repro.cjs` 修复前 exit 1，任务 `75d8d019-5757-4bdf-9581-255666da3279` 在 DB 恢复后仍 RUNNING。修复后原脚本 exit 0，任务 `c120d10a-6536-42a6-8533-16fe63906274` 自动 FAILED / failedStage=GENERATE，保留 `review transient database write outage` 与 finishedAt。进程在该场景中持续运行，无 GET 推进。原审查产物已还原，新增日志单独放在 `F:/material-studio-regate/`。
 - **根因/修复**：阶段 UPDATE 抛错后，catch 内的 FAILED UPDATE 再次抛错，使工作线程退出且没有待结算信息。现在两个失败入口共用一个有界、进程内失败结算器；业务步骤中断后只重试原失败写回。无需新数据库表、依赖或恢复框架。
 - **P2-01**：原媒体类型探针 500→415；新增 MockMvc 和真实浏览器 API 断言。
 - **P2-02**：CSS 仅一处 `#676872` 改为现有 `--muted`；原浏览器 computed style 对比度 **3.1486→5.8588:1**，10px 普通文本达到 AA 4.5:1。不是全站 WCAG 认证，没有改布局/字体。
-- 本地 Java21 的测试/构建、Node22 前端校验/构建、原始 P2 四项探针及 3 个 Playwright 场景已实际运行。新增 H2 UPDATE trigger 回归也验证制作线程释放、失败原因不被重试异常替换、两种既有终态不可覆盖和拒绝执行结算。
+- 本地 Java21 **21 项测试和 package 均通过**；Node22 lint / typecheck / **8 项单测** / build 通过；原始 P2 四项探针和 **3 个 Playwright 场景全部通过**。新增 H2 UPDATE trigger 回归也验证制作线程释放、失败原因不被重试异常替换、两种既有终态不可覆盖和拒绝执行结算。
 - 真实 MySQL 容器故障回归：新增 `python3 scripts/review-gate-db.py`，**仅限可丢弃 Compose 验收数据**；临时阻止 tasks UPDATE，finally 删除 trigger，使用 SQL 等待终态、期间不发 GET/不重启。覆盖阶段写入和失败写回同时故障，以及模拟失败原原因保留。CI 在正常 E2E 后执行并归档 `artifacts/review-gate-db.json`。不要对生产/共享库运行；脚本被强杀时需手动删除其 `regate_transient_write_outage` trigger。
+
+整改源码 commit：**`7dc2ad82d72b51959087fadbbe46232019e1716d`**。实际容器 CI：[40862278903](https://github.com/Jasmine-wind/material-studio/actions/runs/40862278903)，headSha 已核对，frontend / backend / compose-acceptance 三个 job 全绿。MySQL 8.4 三服务 healthy，3 个浏览器 E2E 与新增真实 MySQL 两种写故障场景通过；Java 21 项测试两次通过，npm audit 0 漏洞。
+
+已下载并审阅 artifact `compose-acceptance`：`review-gate-db.json` 中任务 `83a8c226-cc94-4ace-af09-30dc522683dc` 的失败阶段 GENERATE 和原数据库错误保留；任务 `4aacda15-ea73-41c0-938d-0208d7fb9adc` 保留 CHECK_MATERIAL 指定失败原因。两者日志均显示首次/再次写回失败、第三次成功结算，期间无 GET 或重启。SQL 实查 16 条任务（8 成功、8 失败）、14 条素材，全部终态有 finishedAt、无未结算任务。拒绝执行的数据库失败分支由真实 executor + H2 trigger 测试覆盖，不将它扩张声称为 MySQL 容器队列饱和测试。
+
+本地新增证据位于 `F:/material-studio-regate/`：`db-before.log`、`db-after.log`、`java-red.log`、`java-all-final.log`、`java-package-final.log`、`p2-before.log`、`p2-after.log`、`e2e.log` 以及下载的 `ci-40862278903/`。原根目录未跟踪的用户原题文件保留未改；交付 Git 中使用 `docs/EXAM_ORIGINAL.md`，没有提交依赖、构建缓存、数据库或临时日志。Diff 已按规范/原题两轴自查，无子代理工具，未宣称独立交叉审查；最终 Re-Gate 仍由独立审查员签署。
 
 剩余边界：结算记录只在内存中，进程终止会丢失；启动前遗留的悬挂记录不自动修复。数据库永久不可写时不会伪造 FAILED 已落库，而是保留最多 128 个预留并退避、记录日志、拒绝新的超额提交；单次 JDBC 操作仍受连接/驱动超时约束。原始异常完整记录在日志，可理解原因按现有数据库 500 字符字段保存。仅重试终态写回，不自动重试制作。
